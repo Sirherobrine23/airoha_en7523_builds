@@ -1,0 +1,191 @@
+on:
+  workflow_call:
+    inputs:
+      config_file:
+        type: string
+        required: true
+      verbose:
+        type: string
+        required: false
+        default: "s"
+      openwrt_repository:
+        type: string
+        required: false
+        default: openwrt/openwrt
+      files_folder:
+        type: string
+        required: false
+
+jobs:
+  workflow_call:
+    runs-on: ubuntu-latest-nonroot
+    env:
+      CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
+    steps:
+      - name: Openwrt code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.openwrt_repository }}
+          ref: main
+
+      - name: Config repo
+        uses: actions/checkout@v4
+        with:
+          path: config_build
+
+      - name: Install host dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y build-essential clang flex bison g++ gawk gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev file wget ccache
+          if [[ "$(uname -m)" == "x86_64" ]]; then
+            sudo apt install -y gcc-multilib g++-multilib
+          else
+            sudo apt install -y gcc-multilib* g++-multilib*
+          fi
+
+      - name: Free disk space on runner
+        run: |
+          env
+          df -h
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || echo "No cache tools directory"
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /opt/pipx \
+            /usr/lib/mono \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h
+          mkdir logs
+
+      - name: Copy config
+        run: cp -fv "config_build/${{ inputs.config_file }}" .config
+
+      - name: Copy files folder
+        if: ${{ inputs.files_folder != '' }}
+        run: cp -frv "config_build/${{ inputs.files_folder }}" ./files
+
+      - name: Get build cache
+        uses: actions/cache/restore@v5
+        id: ccache_restore
+        with:
+          key: openwrt_cache_${{ runner.os }}_${{ runner.arch }}_${{ inputs.config_file }}
+          path: |
+              .ccache
+              build_dir
+              staging_dir
+              bin/packages
+              tmp
+              dl
+
+      - name: Update and Install feeds
+        run: |
+          sed -i -Ee 's|https://git.openwrt.org/(feed\|project)|https://github.com/openwrt|g' feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Defconfig
+        run: |
+          # CONFIG_CCACHE
+          # CONFIG_CCACHE_DIR
+          make defconfig
+          cat .config
+
+      - name: Download dependencies
+        run: make -j$(($(nproc)+1)) download V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package cleanup
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        id: toolchain_build
+        run: make -j$(($(nproc)+1)) package/cleanup V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Tools compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j$(($(nproc)+1)) tools/compile V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        id: toolchain_build
+        run: make -j$(($(nproc)+1)) toolchain/compile V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain install
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j$(($(nproc)+1)) toolchain/install V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target compiler
+        run: make -j$(($(nproc)+1)) target/compile V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Build info
+        run: make -j$(($(nproc)+1)) buildinfo
+
+      - name: Package compile
+        run: make -j$(($(nproc)+1)) package/compile V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package install
+        run: make -j$(($(nproc)+1)) package/install V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target install
+        run: make -j$(($(nproc)+1)) target/install V=${{ inputs.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package index
+        run: make -j$(($(nproc)+1)) package/index
+
+      - name: JSON overview image
+        run: make -j$(($(nproc)+1)) json_overview_image_info
+
+      - name: Checksum
+        run: make -j$(($(nproc)+1)) checksum
+
+      - name: Upload targets
+        uses: actions/upload-artifact@v3
+        with:
+          retention-days: 2
+          name: target_${{ inputs.config_file }}
+          path: bin/targets/**/*
+
+      - name: Upload logs
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          retention-days: 7
+          name: logs_${{ inputs.config_file }}
+          path: logs/
+
+      - name: Save build cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+          path: |
+              .ccache
+              build_dir
+              staging_dir
+              bin/packages
+              tmp
+              dl
