@@ -48,7 +48,7 @@ jobs:
               - tplink xx530v v1
               - tplink ex530v v1
           files: |
-            bin/targets.tar
-            bin/targets/**/*
-            !bin/targets/**/*.apk
-            !bin/targets/**/*.ipkg
+            **/*/targets.tar
+            **/*/targets/**/*
+            !**/*/targets/**/*.apk
+            !**/*/targets/**/*.ipkg
