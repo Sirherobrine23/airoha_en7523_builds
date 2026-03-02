@@ -34,6 +34,9 @@ jobs:
           # merge-multiple: true
           # pattern: target_*
 
+      - name: List files
+        run: ls -R ./
+
       - name: Create release
         uses: akkuman/gitea-release-action@main
         with:
@@ -48,7 +51,7 @@ jobs:
               - tplink xx530v v1
               - tplink ex530v v1
           files: |
-            **/*/targets.tar
-            **/*/targets/**/*
-            !**/*/targets/**/*.apk
-            !**/*/targets/**/*.ipkg
+            **/*
+            !**/*.apk
+            !**/*.ipkg
+            !**/*.txt
