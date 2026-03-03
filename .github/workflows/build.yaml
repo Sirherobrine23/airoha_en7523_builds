@@ -1,18 +1,19 @@
-name: xx230v build
+name: Airoha en7523 build
 on:
   push:
+  schedule:
+    - cron: 0 15 */3 * *
   workflow_dispatch:
     inputs:
       verbose:
         type: choice
         required: false
-        default: "sc"
+        default: "s"
+        description: Openwrt build verbose level
         options:
+          - "none"
           - "sc"
           - "s"
-          - ""
-  schedule:
-    - cron: 0 12 */2 * *
 
 jobs:
   openwrt_build:
@@ -21,8 +22,9 @@ jobs:
     name: Build to en7523
     with:
        openwrt_repository: airoha_en7523/openwrt
-       verbose: ${{ github.event_name == 'workflow_dispatch' && inputs.verbose || 'sc' }}
-       config_file: en7523.config
+       make_jobs: "2"
+       verbose: ${{ github.event_name == 'workflow_dispatch' && (inputs.verbose == 'none' && '' || inputs.verbose) || 'sc' }}
+       config_file: en7523
 
   release:
     runs-on: ubuntu-latest
