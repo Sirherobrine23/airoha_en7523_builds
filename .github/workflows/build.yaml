@@ -20,6 +20,7 @@ jobs:
     secrets: inherit
     uses: ./.github/workflows/openwrt-build.yaml
     name: Build to en7523
+    runs-on: ubuntu-latest-nonroot
     with:
        openwrt_repository: airoha_en7523/openwrt
        make_jobs: "2"
