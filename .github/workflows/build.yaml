@@ -1,4 +1,42 @@
-name: Airoha en7523 build
+# name: Openwrt build
+# on:
+#   workflow_call:
+#     inputs:
+#       config_file:
+#         type: string
+#         required: true
+#       verbose:
+#         type: string
+#         required: false
+#         default: "s"
+#       openwrt_repository:
+#         type: string
+#         required: false
+#         default: openwrt/openwrt
+#       openwrt_repository_ref:
+#         type: string
+#         required: false
+#         default: main
+#       files_folder:
+#         type: string
+#         required: false
+#       script_def:
+#         type: string
+#         required: false
+#         description: "Script for run before make defconfig"
+#       script_feed:
+#         type: string
+#         required: false
+#         description: "Script for run before ./script/feed update/install"
+#       make_jobs:
+#         type: string
+#         required: false
+#         description: Jobs to run in make
+#         default: "$(($(nproc)+1))"
+
+name: Airoha AN7523 build
+run-name: Airoha AN7523 build - ${{ github.run_number }} - Actor ${{ github.actor || 'Unknown' }}
+
 on:
   push:
   schedule:
@@ -15,47 +53,220 @@ on:
           - "sc"
           - "s"
 
+concurrency:
+  cancel-in-progress: true
+  group: airoha_an7523_build-${{ github.ref }}
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
 jobs:
-  openwrt_build:
-    secrets: inherit
-    uses: ./.github/workflows/openwrt-build.yaml
-    name: Build to en7523
+  build_openwrt:
+    name: Build Openwrt
     runs-on: ubuntu-latest-nonroot
-    with:
-       openwrt_repository: airoha_en7523/openwrt
-       make_jobs: "2"
-       verbose: ${{ github.event_name == 'workflow_dispatch' && (inputs.verbose == 'none' && '' || inputs.verbose) || 'sc' }}
-       config_file: en7523
-
-  release:
-    runs-on: ubuntu-latest
-    needs: openwrt_build
+    env:
+      CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
+      # inputs migration
+      openwrt_repository: airoha_an7523/openwrt
+      openwrt_repository_ref: main
+      # make_jobs: "2"
+      make_jobs: "$(($(nproc)+1))"
+      config_file: an7523
+      verbose: ${{ github.event_name == 'workflow_dispatch' && (inputs.verbose == 'none' && '' || inputs.verbose) || 'sc' }}
+      files_folder: ""
+      script_def: ""
+      script_feed: ""
     steps:
-      - uses: actions/download-artifact@v3
-        with:
-          path: ./
-          # merge-multiple: true
-          # pattern: target_*
+      - name: Check if run on Railway
+        run: |
+          if env | grep -q RAILWAY_; then
+            echo "Running on Railway, setting make_jobs to 2"
+            echo make_jobs="2" >> $GITHUB_ENV
+          fi
 
-      - run: |
-          rm -rf logs_*
-          tar -cvpf target.tar target_*
-          xz -v9e target.tar
+      - name: Openwrt code
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.openwrt_repository }}
+          ref: ${{ env.openwrt_repository_ref }}
+
+      - name: Config repo
+        uses: actions/checkout@v4
+        with:
+          path: config_build
+
+      - name: Install host dependencies
+        run: |
+          pkgs="build-essential clang flex bison g++ gawk gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev file wget ccache"
+          if [[ "$(uname -m)" == "x86_64" ]]; then
+            pkgs="$pkgs gcc-multilib g++-multilib"
+          else
+            pkgs="$pkgs gcc-multilib* g++-multilib*"
+          fi
+          sudo apt update
+          sudo apt install -y $pkgs
+
+      - name: Free disk space on runner
+        run: |
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || echo "No cache tools directory"
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /opt/pipx \
+            /usr/lib/mono \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h
+          free -h
+          mkdir logs || echo "Logs directory already exists"
+
+      - name: Copy config
+        run: cp -fv "config_build/${{ env.config_file }}.config" .config
+
+      - name: Copy files folder
+        if: ${{ env.files_folder != '' }}
+        run: cp -frv "config_build/${{ env.files_folder }}" ./files
+
+      - name: Get build cache
+        uses: actions/cache/restore@v5
+        id: ccache_restore
+        with:
+          key: openwrt_cache_${{ runner.os }}_${{ runner.arch }}_${{ hashFiles('**/.config') }}
+          path: |
+            .ccache
+            build_dir
+            staging_dir
+            bin/packages
+            tmp
+            dl
+
+      - name: Run feed script
+        if: ${{ env.script_feed != '' }}
+        run: ${{ env.script_feed }}
+
+      - name: Update and Install feeds
+        run: |
+          sed -i -Ee 's|https://git.openwrt.org/(feed\|project)|https://github.com/openwrt|g' feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Run def script
+        if: ${{ env.script_def != '' }}
+        run: ${{ env.script_def }}
+
+      - name: Defconfig
+        run: |
+          # CONFIG_CCACHE
+          # CONFIG_CCACHE_DIR
+          make defconfig
+          cat .config
+
+      - name: Download dependencies
+        run: make -j${{env.make_jobs}} download V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package cleanup
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        id: toolchain_build
+        run: make -j${{env.make_jobs}} package/cleanup V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Tools compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} tools/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        id: toolchain_build
+        run: make -j${{env.make_jobs}} toolchain/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain install
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} toolchain/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target compiler
+        run: make -j${{env.make_jobs}} target/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Build info
+        run: make -j${{env.make_jobs}} buildinfo
+
+      - name: Package compile
+        run: make -j${{env.make_jobs}} package/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package install
+        run: make -j${{env.make_jobs}} package/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target install
+        run: make -j${{env.make_jobs}} target/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package index
+        run: make -j${{env.make_jobs}} package/index
+
+      - name: JSON overview image
+        run: make json_overview_image_info
+
+      - name: Checksum
+        run: make checksum
+
+      - name: Save build cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+          path: |
+            .ccache
+            build_dir
+            staging_dir
+            bin/packages
+            tmp
+            dl
+
+      - name: Clean files
+        run: |
+          tar -cvpf build.tar logs/ bin/targets/*
+          xz -v9e build.tar
           find . -name packages -type d | xargs rm -rfv
+          cat <<EOF > release_body.md
+          # AN7523 [Build](/actions/runs/${{ github.run_id }})
+
+          build targets:
+          $(find bin/targets -type f -name 'profiles.json' | xargs -i{} bash -c 'cat {} | jq -r ".profiles | keys | .[]"' | sed 's/^/ - /')
+
+          EOF
 
       - name: Create release
         uses: akkuman/gitea-release-action@main
         with:
           name: v${{ github.run_number }}
           tag_name: v${{ github.run_number }}
-          body: |
-              # EN7523 [Build](/actions/runs/${{ github.run_number }})
-
-              build targets
-
-              - tplink xx230v v1
-              - tplink xx530v v1
-              - tplink ex530v v1
+          body_path: release_body.md
           files: |
-            target.tar.*
-            target_*/**/*
+            build.tar.*
+            bin/targets/**/*
