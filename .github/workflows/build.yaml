@@ -72,7 +72,7 @@ jobs:
       CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
       # inputs migration
       openwrt_repository: airoha_an7523/openwrt
-      openwrt_repository_ref: main
+      openwrt_repository_ref: airoha_an7523
       # make_jobs: "2"
       make_jobs: "$(($(nproc)+1))"
       config_file: an7523
