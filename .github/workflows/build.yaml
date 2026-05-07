@@ -97,7 +97,7 @@ jobs:
       - name: Config repo
         uses: actions/checkout@v4
         with:
-          path: config_build
+          path: ${{ github.workspace }}/config_build
 
       - name: Install host dependencies
         run: |
