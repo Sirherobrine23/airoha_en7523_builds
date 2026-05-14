@@ -34,8 +34,8 @@
 #         description: Jobs to run in make
 #         default: "$(($(nproc)+1))"
 
-name: Airoha AN7523 build
-run-name: Airoha AN7523 build - ${{ github.run_number }} - Actor ${{ github.actor || 'Unknown' }}
+name: Airoha EN7523 build
+run-name: Airoha EN7523 build - ${{ github.run_number }} - Actor ${{ github.actor || 'Unknown' }}
 
 on:
   push:
@@ -55,7 +55,7 @@ on:
 
 concurrency:
   cancel-in-progress: true
-  group: airoha_an7523_build-${{ github.ref }}
+  group: airoha_en7523_build-${{ github.ref }}
 
 permissions:
   actions: read
@@ -71,11 +71,11 @@ jobs:
       CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
       CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
       # inputs migration
-      openwrt_repository: airoha_an7523/openwrt
-      openwrt_repository_ref: airoha_an7523
+      openwrt_repository: airoha_en7523/openwrt
+      openwrt_repository_ref: airoha_en7523
       # make_jobs: "2"
       make_jobs: "$(($(nproc)+1))"
-      config_file: an7523
+      config_file: en7523
       verbose: ${{ github.event_name == 'workflow_dispatch' && (inputs.verbose == 'none' && '' || inputs.verbose) || 'sc' }}
       files_folder: ""
       script_def: ""
@@ -254,7 +254,7 @@ jobs:
           xz -v9e build.tar
           find . -name packages -type d | xargs rm -rfv
           cat <<EOF > release_body.md
-          # AN7523 [Build](/actions/runs/${{ github.run_id }})
+          # EN7523 [Build](/actions/runs/${{ github.run_id }})
 
           build targets:
           $(find bin/targets -type f -name 'profiles.json' | xargs -i{} bash -c 'cat {} | jq -r ".profiles | keys | .[]"' | sed 's/^/ - /')
