@@ -66,7 +66,7 @@ permissions:
 jobs:
   build_openwrt:
     name: Build Openwrt
-    runs-on: ubuntu-latest-nonroot
+    runs-on: ubuntu-latest
     env:
       CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
       CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
@@ -89,13 +89,14 @@ jobs:
           fi
 
       - name: Openwrt code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
+          github-server-url: https://sirherobrine23.com.br
           repository: ${{ env.openwrt_repository }}
           ref: ${{ env.openwrt_repository_ref }}
 
       - name: Config repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           path: ${{ github.workspace }}/config_build
 
@@ -179,7 +180,6 @@ jobs:
 
       - name: Package cleanup
         if: steps.ccache_restore.outputs.cache-hit != 'true'
-        id: toolchain_build
         run: make -j${{env.make_jobs}} package/cleanup V=${{ env.verbose }}
           CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
           CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
@@ -192,7 +192,6 @@ jobs:
 
       - name: Toolchain compile
         if: steps.ccache_restore.outputs.cache-hit != 'true'
-        id: toolchain_build
         run: make -j${{env.make_jobs}} toolchain/compile V=${{ env.verbose }}
           CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
           CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
@@ -262,11 +261,25 @@ jobs:
           EOF
 
       - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: v${{ github.run_number }}
+          tag_name: v${{ github.run_number }}
+          body_path: release_body.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            build.tar.*
+            bin/targets/**/*
+
+      - name: Sirherobrine23 Create release
         uses: akkuman/gitea-release-action@main
         with:
           name: v${{ github.run_number }}
           tag_name: v${{ github.run_number }}
           body_path: release_body.md
+          server_url: https://sirherobrine23.com.br
+          repository: airoha_en7523/builds
+          token: ${{ secrets.GITEA_TOKEN }}
           files: |
             build.tar.*
             bin/targets/**/*
