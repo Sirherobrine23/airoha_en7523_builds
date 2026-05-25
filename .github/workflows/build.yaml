@@ -35,7 +35,7 @@
 #         default: "$(($(nproc)+1))"
 
 name: Airoha EN7523 build
-run-name: Airoha EN7523 build - ${{ github.run_number }} - Actor ${{ github.actor || 'Unknown' }}
+run-name: Airoha EN7523 build - ${{ github.run_number }} (${{ github.run_id }}) - Actor ${{ github.actor || 'Unknown' }}
 
 on:
   push:
@@ -253,7 +253,7 @@ jobs:
           xz -v9e build.tar
           find . -name packages -type d | xargs rm -rfv
           cat <<EOF > release_body.md
-          # EN7523 [Build](/actions/runs/${{ github.run_id }})
+          # EN7523 [Build](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
 
           build targets:
           $(find bin/targets -type f -name 'profiles.json' | xargs -i{} bash -c 'cat {} | jq -r ".profiles | keys | .[]"' | sed 's/^/ - /')
@@ -263,8 +263,8 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v3
         with:
-          name: v${{ github.run_number }}
-          tag_name: v${{ github.run_number }}
+          name: Build Action ${{ github.run_id }}
+          tag_name: v${{ github.run_id }}
           body_path: release_body.md
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
@@ -274,8 +274,8 @@ jobs:
       - name: Sirherobrine23 Create release
         uses: akkuman/gitea-release-action@main
         with:
-          name: v${{ github.run_number }}
-          tag_name: v${{ github.run_number }}
+          name: Build Action ${{ github.run_id }}
+          tag_name: v${{ github.run_id }}
           body_path: release_body.md
           server_url: https://sirherobrine23.com.br
           repository: airoha_en7523/builds
