@@ -1,0 +1,245 @@
+run-name: Build for config file ${{ inputs.config_file }}.config - ${{ github.run_number }} (${{ github.run_id }}) - Actor ${{ github.actor || 'Unknown' }}
+name: Openwrt build
+on:
+  workflow_call:
+    inputs:
+      config_file:
+        type: string
+        required: true
+      verbose:
+        type: string
+        required: false
+        default: "s"
+      openwrt_repository:
+        type: string
+        required: false
+        default: openwrt/openwrt
+      openwrt_repository_ref:
+        type: string
+        required: false
+        default: main
+      files_folder:
+        type: string
+        required: false
+      script_def:
+        type: string
+        required: false
+        description: "Script for run before make defconfig"
+      script_feed:
+        type: string
+        required: false
+        description: "Script for run before ./script/feed update/install"
+      make_jobs:
+        type: string
+        required: false
+        description: Jobs to run in make
+        default: "$(($(nproc)+1))"
+      run-tmate:
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  build_openwrt:
+    name: Build Openwrt
+    runs-on: ubuntu-latest-rootless
+    env:
+      CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
+      verbose: ${{ github.event_name == 'workflow_dispatch' && (inputs.verbose == 'none' && '' || inputs.verbose) || 'sc' }}
+      make_jobs: ${{ inputs.make_jobs }}
+    steps:
+      - name: Check if run on Railway
+        run: |
+          if env | grep -q RAILWAY_; then
+            echo "Running on Railway, setting make_jobs to 1"
+            echo make_jobs="1" >> $GITHUB_ENV
+          fi
+
+      - name: Openwrt code
+        uses: actions/checkout@v6
+        with:
+          github-server-url: https://sirherobrine23.com.br
+          repository: ${{ inputs.openwrt_repository }}
+          ref: ${{ inputs.openwrt_repository_ref }}
+
+      - name: Config repo
+        uses: actions/checkout@v6
+        with:
+          path: ${{ github.workspace }}/config_build
+
+      - name: Install host dependencies
+        run: |
+          pkgs="build-essential clang flex bison g++ gawk gettext git libncurses5-dev libssl-dev python3-setuptools rsync swig unzip zlib1g-dev file wget ccache"
+          if [[ "$(uname -m)" == "x86_64" ]]; then
+            pkgs="$pkgs gcc-multilib g++-multilib"
+          else
+            pkgs="$pkgs gcc-multilib* g++-multilib*"
+          fi
+          sudo apt update
+          sudo apt install -y $pkgs
+
+      - name: Free disk space on runner
+        run: |
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY" || echo "No cache tools directory"
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/google/chrome \
+            /opt/microsoft/msedge \
+            /opt/microsoft/powershell \
+            /opt/pipx \
+            /usr/lib/mono \
+            /usr/local/julia* \
+            /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/powershell \
+            /usr/share/dotnet \
+            /usr/share/swift
+          df -h
+          free -h
+          mkdir logs || echo "Logs directory already exists"
+
+      - name: Setup tmate session
+        id: tmate
+        if: ${{ inputs.run-tmate == true }}
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+
+      - name: Copy config
+        run: cp -fv "config_build/${{ inputs.config_file }}.config" .config
+
+      - name: Copy files folder
+        if: ${{ inputs.files_folder != '' }}
+        run: cp -frv "config_build/${{ inputs.files_folder }}" ./files
+
+      - name: Get build cache
+        uses: actions/cache/restore@v5
+        id: ccache_restore
+        with:
+          key: openwrt_cache_${{ runner.os }}_${{ runner.arch }}_${{ hashFiles('**/.config') }}
+          path: |
+            .ccache
+            build_dir
+            staging_dir
+            bin/packages
+            tmp
+            dl
+
+      - name: Run feed script
+        if: ${{ inputs.script_feed != '' }}
+        run: ${{ inputs.script_feed }}
+
+      - name: Update and Install feeds
+        run: |
+          sed -i -Ee 's|https://git.openwrt.org/(feed\|project)|https://github.com/openwrt|g' feeds.conf.default
+          ./scripts/feeds update -a
+          ./scripts/feeds install -a
+
+      - name: Run def script
+        if: ${{ inputs.script_def != '' }}
+        run: ${{ inputs.script_def }}
+
+      - name: Defconfig
+        run: |
+          # CONFIG_CCACHE
+          # CONFIG_CCACHE_DIR
+          make defconfig
+          cat .config
+
+      - name: Download dependencies
+        run: make -j${{env.make_jobs}} download V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package cleanup
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} package/cleanup V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Tools compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} tools/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain compile
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} toolchain/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Toolchain install
+        if: steps.ccache_restore.outputs.cache-hit != 'true'
+        run: make -j${{env.make_jobs}} toolchain/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target compiler
+        run: make -j${{env.make_jobs}} target/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Build info
+        run: make -j${{env.make_jobs}} buildinfo
+
+      - name: Package compile
+        run: make -j${{env.make_jobs}} package/compile V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package install
+        run: make -j${{env.make_jobs}} package/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Target install
+        run: make -j${{env.make_jobs}} target/install V=${{ env.verbose }}
+          CONFIG_CCACHE_DIR="$CONFIG_CCACHE_DIR"
+          CONFIG_BUILD_LOG_DIR="$CONFIG_BUILD_LOG_DIR"
+
+      - name: Package index
+        run: make -j${{env.make_jobs}} package/index
+
+      - name: JSON overview image
+        run: make json_overview_image_info
+
+      - name: Checksum
+        run: make checksum
+
+      - name: Save build cache
+        uses: actions/cache/save@v5
+        if: always()
+        with:
+          key: ${{ steps.ccache_restore.outputs.cache-primary-key }}
+          path: |
+            .ccache
+            build_dir
+            staging_dir
+            bin/packages
+            tmp
+            dl
+
+      - name: Clean files
+        run: |
+          tar -cvpf build.tar logs/ bin/targets/*
+          xz -v9e build.tar
+          find . -name packages -type d | xargs rm -rfv
+          cat <<EOF > release_body.md
+          # ${{ inputs.config_file }}.config [Build](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+          build targets:
+          $(find bin/targets -type f -name 'profiles.json' | xargs -i{} bash -c 'cat {} | jq -r ".profiles | keys | .[]"' | sed 's/^/ - /')
+
+          EOF
+          tar -cvpf artifacts_${{ inputs.config_file }}.tar release_body.md build.tar.xz logs/ bin/targets/*
+          xz -v9e artifacts_${{ inputs.config_file }}.tar
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3.2.2
+        with:
+          name: artifacts_${{ inputs.config_file }}
+          retention-days: 3
+          path: artifacts_${{ inputs.config_file }}.tar.xz
