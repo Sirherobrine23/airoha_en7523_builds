@@ -7,11 +7,6 @@ on:
     - cron: 0 15 */3 * *
   workflow_dispatch:
     inputs:
-      run-tmate:
-        type: boolean
-        required: false
-        default: false
-        description: Run tmate session for debug
       verbose:
         type: choice
         required: false
@@ -37,11 +32,12 @@ jobs:
     name: Build Openwrt
     uses: ./.github/workflows/generic.yaml
     with:
-      openwrt_repository: airoha_en7523/openwrt
       verbose: ${{ github.event_name == 'workflow_dispatch' && inputs.verbose || 's' }}
+      # Static config
       config_file: en7523
       files_folder: en7523_files
-      run-tmate: ${{ github.event_name == 'workflow_dispatch' && inputs.run-tmate || false }}
+      openwrt_repository: Sirherobrine23/openwrt
+      openwrt_repository_ref: airoha_en7523
 
   release:
     name: Create Release
@@ -49,13 +45,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download actifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v8
+        with:
+          name: artifacts_en7523.tar.xz
 
       - name: Uncompress build artifacts
         run: |
-          find . -type f -name "artifacts_en7523.tar.xz" -exec mv -fv {} artifacts_en7523.tar.xz \;
           xz -d artifacts_en7523.tar.xz
           tar -xvf artifacts_en7523.tar
+
+      - name: Create release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Build Action ${{ github.run_id }}
+          tag_name: v${{ github.run_id }}
+          body_path: release_body.md
+          token: ${{ secrets.GITHUB_TOKEN }}
+          files: |
+            build.tar.*
+            bin/targets/**/*
 
       - name: Sirherobrine23 Create release
         uses: akkuman/gitea-release-action@main

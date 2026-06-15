@@ -42,7 +42,7 @@ on:
 jobs:
   build_openwrt:
     name: Build Openwrt
-    runs-on: ubuntu-latest-rootless
+    runs-on: ubuntu-latest
     env:
       CONFIG_CCACHE_DIR: ${{ github.workspace }}/.ccache
       CONFIG_BUILD_LOG_DIR: ${{ github.workspace }}/logs
@@ -59,7 +59,6 @@ jobs:
       - name: Openwrt code
         uses: actions/checkout@v6
         with:
-          github-server-url: https://sirherobrine23.com.br
           repository: ${{ inputs.openwrt_repository }}
           ref: ${{ inputs.openwrt_repository_ref }}
 
@@ -238,8 +237,9 @@ jobs:
           xz -v9e artifacts_${{ inputs.config_file }}.tar
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v3.2.2
+        uses: actions/upload-artifact@v7
         with:
-          name: artifacts_${{ inputs.config_file }}
+          name: artifacts_${{ inputs.config_file }}.tar.xz
           retention-days: 3
+          archive: false
           path: artifacts_${{ inputs.config_file }}.tar.xz
