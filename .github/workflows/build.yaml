@@ -6,6 +6,11 @@ on:
   schedule:
     - cron: 0 15 */3 * *
   workflow_dispatch:
+    make_jobs:
+      type: string
+      required: false
+      description: Jobs to run in make
+      default: "$(($(nproc)+1))"
     inputs:
       verbose:
         type: choice
@@ -33,6 +38,7 @@ jobs:
     uses: ./.github/workflows/generic.yaml
     with:
       verbose: ${{ github.event_name == 'workflow_dispatch' && inputs.verbose || 's' }}
+      make_jobs: ${{ github.event_name == 'workflow_dispatch' && inputs.make_jobs || '$(($(nproc)+1))' }}
       # Static config
       config_file: en7523
       files_folder: en7523_files
