@@ -3,6 +3,9 @@ run-name: Airoha EN7523 build - ${{ github.run_number }} (${{ github.run_id }}) 
 
 on:
   push:
+    branches:
+      - main
+      - master
   schedule:
     - cron: 0 15 */3 * *
   workflow_dispatch:
@@ -61,7 +64,7 @@ jobs:
           tar -xvf artifacts_en7523.tar
 
       - name: Create release
-        uses: softprops/action-gh-release@v3
+        uses: Sirherobrine23/action-release@master
         with:
           name: Build Action ${{ github.run_id }}
           tag_name: v${{ github.run_id }}
@@ -72,7 +75,7 @@ jobs:
             bin/targets/**/*
 
       - name: Sirherobrine23 Create release
-        uses: akkuman/gitea-release-action@main
+        uses: Sirherobrine23/action-release@master
         with:
           name: Build Action ${{ github.run_id }}
           tag_name: v${{ github.run_id }}

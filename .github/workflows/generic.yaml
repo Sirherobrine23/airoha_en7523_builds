@@ -55,7 +55,7 @@ jobs:
             echo "Running on Railway, setting make_jobs to 1"
             echo make_jobs="1" >> $GITHUB_ENV
           else
-            echo Building with $make_jobs CPU Cores
+            echo Building with ${{env.make_jobs}} CPU Cores
           fi
 
       - name: Openwrt code
@@ -147,7 +147,7 @@ jobs:
           # CONFIG_CCACHE
           # CONFIG_CCACHE_DIR
           make defconfig
-          cat .config
+          diff -u .config.old .config || echo
 
       - name: Download dependencies
         run: make -j${{env.make_jobs}} download V=${{ env.verbose }}
